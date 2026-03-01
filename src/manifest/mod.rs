@@ -80,6 +80,21 @@ impl Manifest {
         Ok(repo_path)
     }
 
+    /// Remove a file or directory mapping by system path.
+    /// Returns the repo path that was removed.
+    pub fn remove(&mut self, system_path: &Path) -> Result<String> {
+        let repo_path = Self::derive_repo_path(system_path)?;
+
+        if self.files.remove(&repo_path).is_some() {
+            return Ok(repo_path);
+        }
+        if self.directories.remove(&repo_path).is_some() {
+            return Ok(repo_path);
+        }
+
+        bail!("not tracked: {}", system_path.display())
+    }
+
     /// Derive the repo path from a system path.
     /// ~/.config/ghostty/config -> home/.config/ghostty/config
     /// /etc/some-config         -> system/etc/some-config

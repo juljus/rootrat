@@ -2,6 +2,7 @@ pub mod add;
 pub mod apply;
 pub mod diff;
 pub mod init;
+pub mod rm;
 pub mod status;
 
 use anyhow::Result;

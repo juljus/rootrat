@@ -274,3 +274,63 @@ fn load_manifest_without_directories_section() {
     assert!(loaded.directories.is_empty());
     assert_eq!(loaded.files.len(), 1);
 }
+
+// -- Remove tests --
+
+#[test]
+fn remove_file_entry() {
+    let home = dirs::home_dir().unwrap();
+    let system_path = home.join(".config/ghostty/config");
+    let mut manifest = Manifest::new();
+    manifest.files.insert(
+        "home/.config/ghostty/config".to_string(),
+        "~/.config/ghostty/config".to_string(),
+    );
+
+    let repo_path = manifest.remove(&system_path).unwrap();
+
+    assert_eq!(repo_path, "home/.config/ghostty/config");
+    assert!(manifest.files.is_empty());
+}
+
+#[test]
+fn remove_directory_entry() {
+    let home = dirs::home_dir().unwrap();
+    let system_path = home.join(".config/nvim");
+    let mut manifest = Manifest::new();
+    manifest.directories.insert(
+        "home/.config/nvim".to_string(),
+        "~/.config/nvim".to_string(),
+    );
+
+    let repo_path = manifest.remove(&system_path).unwrap();
+
+    assert_eq!(repo_path, "home/.config/nvim");
+    assert!(manifest.directories.is_empty());
+}
+
+#[test]
+fn remove_nonexistent_errors() {
+    let mut manifest = Manifest::new();
+    let result = manifest.remove(Path::new("/etc/not-tracked"));
+    assert!(result.is_err());
+}
+
+#[test]
+fn remove_leaves_other_entries() {
+    let home = dirs::home_dir().unwrap();
+    let mut manifest = Manifest::new();
+    manifest.files.insert(
+        "home/.config/a.conf".to_string(),
+        "~/.config/a.conf".to_string(),
+    );
+    manifest.files.insert(
+        "home/.config/b.conf".to_string(),
+        "~/.config/b.conf".to_string(),
+    );
+
+    manifest.remove(&home.join(".config/a.conf")).unwrap();
+
+    assert_eq!(manifest.files.len(), 1);
+    assert!(manifest.files.contains_key("home/.config/b.conf"));
+}

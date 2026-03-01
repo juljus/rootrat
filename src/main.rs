@@ -28,6 +28,11 @@ enum Commands {
         /// Only show diff for this file
         path: Option<String>,
     },
+    /// Remove a file or directory from rootrat tracking
+    Rm {
+        /// Path to the file or directory to stop tracking
+        path: String,
+    },
     /// Initialize rootrat (optionally clone from a git URL)
     Init {
         /// Git URL to clone from (e.g. github.com/user/dotfiles)
@@ -144,6 +149,17 @@ fn main() -> Result<()> {
                     println!();
                 }
             }
+        }
+        Commands::Rm { path } => {
+            let expanded = Manifest::expand_tilde(&path);
+            let system_path = std::fs::canonicalize(&expanded).unwrap_or(expanded);
+            let mut manifest = Manifest::load_or_create()?;
+            let repo = repo_dir(&manifest)?;
+
+            commands::rm::execute(&system_path, &repo, &mut manifest)?;
+            manifest.save_default()?;
+
+            println!("removed: {}", system_path.display());
         }
         Commands::Init { url: None } => {
             let dir = std::env::current_dir()?;
