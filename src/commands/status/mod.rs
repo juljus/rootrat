@@ -17,7 +17,6 @@ pub enum FileState {
 
 #[derive(Debug)]
 pub struct StatusEntry {
-    pub repo_path: String,
     pub system_path: String,
     pub state: FileState,
 }
@@ -46,7 +45,6 @@ pub fn execute(repo_dir: &Path, manifest: &Manifest) -> Result<Vec<StatusEntry>>
         };
 
         entries.push(StatusEntry {
-            repo_path: repo_path.clone(),
             system_path: system_path.clone(),
             state,
         });
