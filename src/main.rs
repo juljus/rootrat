@@ -4,6 +4,7 @@ mod manifest;
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 use manifest::Manifest;
+use std::io::Write;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -67,22 +68,66 @@ fn main() -> Result<()> {
             let manifest = Manifest::load_or_create()?;
             let repo = repo_dir(&manifest)?;
 
-            let entries = commands::apply::execute(&repo, &manifest)?;
+            use commands::apply::ApplyState;
+            let entries = commands::apply::plan(&repo, &manifest)?;
 
             if entries.is_empty() {
                 println!("no files tracked");
-            } else {
-                use commands::apply::ApplyState;
-                for entry in &entries {
-                    let marker = match entry.state {
-                        ApplyState::Created => "  created",
-                        ApplyState::Updated => "  updated",
-                        ApplyState::Unchanged => "  unchanged",
-                        ApplyState::MissingFromRepo => "  missing (repo)",
-                    };
-                    println!("{:>20}  {}", marker, entry.system_path);
+                return Ok(());
+            }
+
+            let created: Vec<_> = entries.iter().filter(|e| e.state == ApplyState::Created).collect();
+            let updated: Vec<_> = entries.iter().filter(|e| e.state == ApplyState::Updated).collect();
+            let deleted: Vec<_> = entries.iter().filter(|e| e.state == ApplyState::Deleted).collect();
+            let missing: Vec<_> = entries.iter().filter(|e| e.state == ApplyState::MissingFromRepo).collect();
+            let unchanged_count = entries.iter().filter(|e| e.state == ApplyState::Unchanged).count();
+
+            if created.is_empty() && updated.is_empty() && deleted.is_empty() && missing.is_empty() {
+                println!("all {} files up to date", unchanged_count);
+                return Ok(());
+            }
+
+            if !created.is_empty() {
+                println!("  create:");
+                for entry in &created {
+                    println!("    {}", entry.system_path);
                 }
             }
+            if !updated.is_empty() {
+                println!("  modify:");
+                for entry in &updated {
+                    println!("    {}", entry.system_path);
+                }
+            }
+            if !deleted.is_empty() {
+                println!("  delete:");
+                for entry in &deleted {
+                    println!("    {}", entry.system_path);
+                }
+            }
+            if !missing.is_empty() {
+                println!("  missing (repo):");
+                for entry in &missing {
+                    println!("    {}", entry.system_path);
+                }
+            }
+            if unchanged_count > 0 {
+                println!("  unchanged: {}", unchanged_count);
+            }
+
+            println!();
+            print!("proceed? [y/N] ");
+            std::io::stdout().flush()?;
+
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input)?;
+            if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
+                println!("aborted");
+                return Ok(());
+            }
+
+            commands::apply::apply_entries(&entries)?;
+            println!("done");
         }
         Commands::Diff { path } => {
             let manifest = Manifest::load_or_create()?;
@@ -115,7 +160,7 @@ fn main() -> Result<()> {
 
             println!("cloned to: {}", result.repo_dir.display());
 
-            // Apply all files from the cloned repo
+            // Apply all files from the cloned repo (non-interactive, skips deletes)
             let entries = commands::apply::execute(&result.repo_dir, &result.manifest)?;
 
             use commands::apply::ApplyState;
@@ -124,6 +169,7 @@ fn main() -> Result<()> {
                     ApplyState::Created => "  created",
                     ApplyState::Updated => "  updated",
                     ApplyState::Unchanged => "  unchanged",
+                    ApplyState::Deleted => "  skipped (delete)",
                     ApplyState::MissingFromRepo => "  missing (repo)",
                 };
                 println!("{:>20}  {}", marker, entry.system_path);
