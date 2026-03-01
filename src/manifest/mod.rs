@@ -60,20 +60,31 @@ impl LocalConfig {
 
 // -- Manifest: file mappings at <repo>/rootrat.toml --
 
+fn default_ignore() -> Vec<String> {
+    vec![
+        ".DS_Store".to_string(),
+        "Thumbs.db".to_string(),
+        ".git".to_string(),
+    ]
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Manifest {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub files: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub directories: BTreeMap<String, String>,
+    #[serde(default = "default_ignore")]
+    pub ignore: Vec<String>,
 }
 
 impl Manifest {
-    /// Create a new empty manifest.
+    /// Create a new manifest with default ignore list.
     pub fn new() -> Self {
         Self {
             files: BTreeMap::new(),
             directories: BTreeMap::new(),
+            ignore: default_ignore(),
         }
     }
 

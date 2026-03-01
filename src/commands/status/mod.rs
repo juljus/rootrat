@@ -43,8 +43,8 @@ pub fn execute(repo_dir: &Path, manifest: &Manifest) -> Result<Vec<StatusEntry>>
         let repo_base = repo_dir.join(repo_path);
         let system_base = Manifest::expand_tilde(system_path);
 
-        let repo_files = collect_files(&repo_base)?;
-        let system_files = collect_files(&system_base)?;
+        let repo_files = collect_files(&repo_base, &manifest.ignore)?;
+        let system_files = collect_files(&system_base, &manifest.ignore)?;
         let all_files: std::collections::BTreeSet<_> =
             repo_files.union(&system_files).collect();
 

@@ -324,6 +324,70 @@ fn load_empty_manifest() {
     assert!(loaded.directories.is_empty());
 }
 
+// -- Ignore tests --
+
+#[test]
+fn new_manifest_has_default_ignore() {
+    let manifest = Manifest::new();
+    assert!(manifest.ignore.contains(&".DS_Store".to_string()));
+    assert!(manifest.ignore.contains(&"Thumbs.db".to_string()));
+    assert!(manifest.ignore.contains(&".git".to_string()));
+}
+
+#[test]
+fn save_and_load_roundtrip_with_ignore() {
+    let dir = TempDir::new().unwrap();
+    let manifest_path = dir.path().join("rootrat.toml");
+
+    let mut manifest = Manifest::new();
+    manifest.ignore = vec!["custom-ignore".to_string()];
+
+    manifest.save(&manifest_path).unwrap();
+
+    let loaded = Manifest::load(&manifest_path).unwrap();
+    assert_eq!(loaded.ignore, vec!["custom-ignore".to_string()]);
+}
+
+#[test]
+fn load_manifest_without_ignore_gets_defaults() {
+    let dir = TempDir::new().unwrap();
+    let manifest_path = dir.path().join("rootrat.toml");
+
+    let content = "[files]\n\"home/.testrc\" = \"~/.testrc\"\n";
+    fs::write(&manifest_path, content).unwrap();
+
+    let loaded = Manifest::load(&manifest_path).unwrap();
+    assert!(loaded.ignore.contains(&".DS_Store".to_string()));
+    assert!(loaded.ignore.contains(&".git".to_string()));
+}
+
+#[test]
+fn explicit_empty_ignore_is_respected() {
+    let dir = TempDir::new().unwrap();
+    let manifest_path = dir.path().join("rootrat.toml");
+
+    let content = "ignore = []\n";
+    fs::write(&manifest_path, content).unwrap();
+
+    let loaded = Manifest::load(&manifest_path).unwrap();
+    assert!(loaded.ignore.is_empty());
+}
+
+#[test]
+fn saved_toml_contains_ignore_list() {
+    let dir = TempDir::new().unwrap();
+    let manifest_path = dir.path().join("rootrat.toml");
+
+    let manifest = Manifest::new();
+    manifest.save(&manifest_path).unwrap();
+
+    let content = fs::read_to_string(&manifest_path).unwrap();
+    assert!(content.contains("ignore"));
+    assert!(content.contains(".DS_Store"));
+    assert!(content.contains("Thumbs.db"));
+    assert!(content.contains(".git"));
+}
+
 // -- Remove tests --
 
 #[test]

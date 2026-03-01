@@ -41,8 +41,8 @@ pub fn plan(repo_dir: &Path, manifest: &Manifest) -> Result<Vec<ApplyEntry>> {
         let repo_base = repo_dir.join(repo_path);
         let system_base = Manifest::expand_tilde(system_path);
 
-        let repo_files = collect_files(&repo_base)?;
-        let system_files = collect_files(&system_base)?;
+        let repo_files = collect_files(&repo_base, &manifest.ignore)?;
+        let system_files = collect_files(&system_base, &manifest.ignore)?;
 
         // Files in repo -> Created, Updated, or Unchanged
         for relative in &repo_files {

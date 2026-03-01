@@ -278,3 +278,66 @@ fn collect_full_directory_flow() {
     assert_eq!(fs::read_to_string(repo_base.join("brand-new.lua")).unwrap(), "just added");
     assert!(!repo_base.join("removed.lua").exists());
 }
+
+#[test]
+fn ignored_files_are_skipped() {
+    let repo_dir = TempDir::new().unwrap();
+    let system_dir = TempDir::new().unwrap();
+    let manifest = setup_tracked_dir(
+        repo_dir.path(),
+        system_dir.path(),
+        "nvim",
+        &[("init.lua", "config")],
+        &[("init.lua", "config"), (".DS_Store", "junk"), ("Thumbs.db", "junk")],
+    );
+
+    let entries = plan(repo_dir.path(), &manifest).unwrap();
+
+    // .DS_Store and Thumbs.db should be ignored -- only init.lua should appear
+    assert_eq!(entries.len(), 1);
+    assert!(entries[0].system_path.contains("init.lua"));
+}
+
+#[test]
+fn ignored_directories_are_skipped() {
+    let repo_dir = TempDir::new().unwrap();
+    let system_dir = TempDir::new().unwrap();
+
+    // Create a .git dir inside the tracked directory on system
+    let system_path = system_dir.path().join("nvim");
+    fs::create_dir_all(system_path.join(".git/objects")).unwrap();
+    create_file(&system_path.join(".git/objects/abc"), "git internal");
+
+    let manifest = setup_tracked_dir(
+        repo_dir.path(),
+        system_dir.path(),
+        "nvim",
+        &[("init.lua", "config")],
+        &[("init.lua", "config")],
+    );
+
+    let entries = plan(repo_dir.path(), &manifest).unwrap();
+
+    // .git directory should be completely ignored
+    assert_eq!(entries.len(), 1);
+    assert!(entries[0].system_path.contains("init.lua"));
+}
+
+#[test]
+fn custom_ignore_is_respected() {
+    let repo_dir = TempDir::new().unwrap();
+    let system_dir = TempDir::new().unwrap();
+    let mut manifest = setup_tracked_dir(
+        repo_dir.path(),
+        system_dir.path(),
+        "nvim",
+        &[("init.lua", "config")],
+        &[("init.lua", "config"), ("notes.txt", "my notes")],
+    );
+    manifest.ignore = vec!["notes.txt".to_string()];
+
+    let entries = plan(repo_dir.path(), &manifest).unwrap();
+
+    assert_eq!(entries.len(), 1);
+    assert!(entries[0].system_path.contains("init.lua"));
+}
