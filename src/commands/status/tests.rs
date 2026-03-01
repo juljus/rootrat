@@ -149,3 +149,127 @@ fn empty_manifest_returns_empty() {
 
     assert!(entries.is_empty());
 }
+
+// -- Directory support tests --
+
+fn setup_tracked_dir(
+    repo_dir: &Path,
+    system_dir: &Path,
+    dir_name: &str,
+    repo_files: &[(&str, &str)],
+    system_files: &[(&str, &str)],
+) -> Manifest {
+    let system_path = system_dir.join(dir_name);
+    let repo_path = Manifest::derive_repo_path(&system_path).unwrap();
+
+    for (name, content) in repo_files {
+        create_file(&repo_dir.join(&repo_path).join(name), content);
+    }
+    for (name, content) in system_files {
+        create_file(&system_path.join(name), content);
+    }
+
+    // Ensure the system dir exists even if no files (for is_dir detection)
+    fs::create_dir_all(&system_path).unwrap();
+
+    let mut manifest = Manifest::new();
+    manifest.add(&system_path).unwrap();
+    manifest
+}
+
+#[test]
+fn directory_all_unchanged() {
+    let repo_dir = TempDir::new().unwrap();
+    let system_dir = TempDir::new().unwrap();
+    let files = &[("init.lua", "config"), ("lua/plugins.lua", "plugins")];
+    let manifest = setup_tracked_dir(
+        repo_dir.path(),
+        system_dir.path(),
+        "nvim",
+        files,
+        files,
+    );
+
+    let entries = execute(repo_dir.path(), &manifest).unwrap();
+
+    assert!(entries.iter().all(|e| e.state == FileState::Unchanged));
+    assert_eq!(entries.len(), 2);
+}
+
+#[test]
+fn directory_modified_file() {
+    let repo_dir = TempDir::new().unwrap();
+    let system_dir = TempDir::new().unwrap();
+    let manifest = setup_tracked_dir(
+        repo_dir.path(),
+        system_dir.path(),
+        "nvim",
+        &[("init.lua", "repo version")],
+        &[("init.lua", "system version")],
+    );
+
+    let entries = execute(repo_dir.path(), &manifest).unwrap();
+
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].state, FileState::Modified);
+}
+
+#[test]
+fn directory_file_only_in_system() {
+    let repo_dir = TempDir::new().unwrap();
+    let system_dir = TempDir::new().unwrap();
+    let manifest = setup_tracked_dir(
+        repo_dir.path(),
+        system_dir.path(),
+        "nvim",
+        &[("init.lua", "config")],
+        &[("init.lua", "config"), ("extra.lua", "new file")],
+    );
+
+    let entries = execute(repo_dir.path(), &manifest).unwrap();
+
+    let missing = entries
+        .iter()
+        .find(|e| e.state == FileState::MissingFromRepo);
+    assert!(missing.is_some());
+    assert_eq!(entries.len(), 2);
+}
+
+#[test]
+fn directory_file_only_in_repo() {
+    let repo_dir = TempDir::new().unwrap();
+    let system_dir = TempDir::new().unwrap();
+    let manifest = setup_tracked_dir(
+        repo_dir.path(),
+        system_dir.path(),
+        "nvim",
+        &[("init.lua", "config"), ("old.lua", "removed")],
+        &[("init.lua", "config")],
+    );
+
+    let entries = execute(repo_dir.path(), &manifest).unwrap();
+
+    let missing = entries
+        .iter()
+        .find(|e| e.state == FileState::MissingFromSystem);
+    assert!(missing.is_some());
+    assert_eq!(entries.len(), 2);
+}
+
+#[test]
+fn directory_missing_entirely_from_repo() {
+    let repo_dir = TempDir::new().unwrap();
+    let system_dir = TempDir::new().unwrap();
+
+    // Create system dir with files but no repo dir at all
+    let system_path = system_dir.path().join("nvim");
+    create_file(&system_path.join("init.lua"), "config");
+
+    let mut manifest = Manifest::new();
+    manifest.add(&system_path).unwrap();
+
+    let entries = execute(repo_dir.path(), &manifest).unwrap();
+
+    assert!(entries.iter().all(|e| e.state == FileState::MissingFromRepo));
+    assert_eq!(entries.len(), 1);
+}

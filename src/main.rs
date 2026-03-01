@@ -15,9 +15,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Add a file to rootrat tracking
+    /// Add a file or directory to rootrat tracking
     Add {
-        /// Path to the file to track
+        /// Path to the file or directory to track
         path: String,
     },
     /// Apply tracked files from repo to system

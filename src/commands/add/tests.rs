@@ -87,3 +87,69 @@ fn duplicate_add_updates_file_content() {
     assert_eq!(fs::read_to_string(copied).unwrap(), "version 2");
     assert_eq!(manifest.files.len(), 1);
 }
+
+// -- Directory support tests --
+
+fn create_dir_with_files(base: &Path, name: &str, files: &[(&str, &str)]) -> PathBuf {
+    let dir_path = base.join(name);
+    for (file_name, content) in files {
+        let file_path = dir_path.join(file_name);
+        fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+        fs::write(&file_path, content).unwrap();
+    }
+    dir_path
+}
+
+#[test]
+fn copies_directory_to_repo() {
+    let (repo_dir, source_dir) = setup();
+    let dir = create_dir_with_files(
+        source_dir.path(),
+        "myconfig",
+        &[("init.lua", "vim config"), ("lua/plugins.lua", "plugins")],
+    );
+    let mut manifest = Manifest::new();
+
+    execute(&dir, repo_dir.path(), &mut manifest).unwrap();
+
+    let repo_path = Manifest::derive_repo_path(&dir).unwrap();
+    let repo_dest = repo_dir.path().join(&repo_path);
+    assert_eq!(
+        fs::read_to_string(repo_dest.join("init.lua")).unwrap(),
+        "vim config"
+    );
+    assert_eq!(
+        fs::read_to_string(repo_dest.join("lua/plugins.lua")).unwrap(),
+        "plugins"
+    );
+}
+
+#[test]
+fn adds_directory_entry_to_manifest() {
+    let (repo_dir, source_dir) = setup();
+    let dir = create_dir_with_files(source_dir.path(), "myconfig", &[("a.txt", "a")]);
+    let mut manifest = Manifest::new();
+
+    execute(&dir, repo_dir.path(), &mut manifest).unwrap();
+
+    assert_eq!(manifest.directories.len(), 1);
+    assert!(manifest.files.is_empty());
+}
+
+#[test]
+fn duplicate_directory_add_updates_content() {
+    let (repo_dir, source_dir) = setup();
+    let dir = create_dir_with_files(source_dir.path(), "myconfig", &[("a.txt", "v1")]);
+    let mut manifest = Manifest::new();
+
+    execute(&dir, repo_dir.path(), &mut manifest).unwrap();
+
+    // Update a file
+    fs::write(dir.join("a.txt"), "v2").unwrap();
+    execute(&dir, repo_dir.path(), &mut manifest).unwrap();
+
+    let repo_path = Manifest::derive_repo_path(&dir).unwrap();
+    let copied = repo_dir.path().join(&repo_path).join("a.txt");
+    assert_eq!(fs::read_to_string(copied).unwrap(), "v2");
+    assert_eq!(manifest.directories.len(), 1);
+}

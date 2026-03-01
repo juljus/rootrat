@@ -130,3 +130,83 @@ fn filter_by_path() {
 
     assert_eq!(entries.len(), 1);
 }
+
+// -- Directory support tests --
+
+fn setup_tracked_dir(
+    repo_dir: &Path,
+    system_dir: &Path,
+    dir_name: &str,
+    repo_files: &[(&str, &str)],
+    system_files: &[(&str, &str)],
+) -> Manifest {
+    let system_path = system_dir.join(dir_name);
+    let repo_path = Manifest::derive_repo_path(&system_path).unwrap();
+
+    for (name, content) in repo_files {
+        create_file(&repo_dir.join(&repo_path).join(name), content);
+    }
+    for (name, content) in system_files {
+        create_file(&system_path.join(name), content);
+    }
+    fs::create_dir_all(&system_path).unwrap();
+
+    let mut manifest = Manifest::new();
+    manifest.add(&system_path).unwrap();
+    manifest
+}
+
+#[test]
+fn directory_identical_returns_empty() {
+    let repo_dir = TempDir::new().unwrap();
+    let system_dir = TempDir::new().unwrap();
+    let files = &[("init.lua", "config"), ("lua/plugins.lua", "plugins")];
+    let manifest = setup_tracked_dir(
+        repo_dir.path(),
+        system_dir.path(),
+        "nvim",
+        files,
+        files,
+    );
+
+    let entries = execute(repo_dir.path(), &manifest, None).unwrap();
+
+    assert!(entries.is_empty());
+}
+
+#[test]
+fn directory_modified_file_shows_diff() {
+    let repo_dir = TempDir::new().unwrap();
+    let system_dir = TempDir::new().unwrap();
+    let manifest = setup_tracked_dir(
+        repo_dir.path(),
+        system_dir.path(),
+        "nvim",
+        &[("init.lua", "old line\n")],
+        &[("init.lua", "new line\n")],
+    );
+
+    let entries = execute(repo_dir.path(), &manifest, None).unwrap();
+
+    assert_eq!(entries.len(), 1);
+    assert!(entries[0].diff.contains("old line"));
+    assert!(entries[0].diff.contains("new line"));
+}
+
+#[test]
+fn directory_file_only_in_system_shows_missing() {
+    let repo_dir = TempDir::new().unwrap();
+    let system_dir = TempDir::new().unwrap();
+    let manifest = setup_tracked_dir(
+        repo_dir.path(),
+        system_dir.path(),
+        "nvim",
+        &[],
+        &[("extra.lua", "new file")],
+    );
+
+    let entries = execute(repo_dir.path(), &manifest, None).unwrap();
+
+    assert_eq!(entries.len(), 1);
+    assert!(entries[0].diff.contains("missing from repo"));
+}
