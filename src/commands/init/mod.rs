@@ -2,25 +2,26 @@ use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::manifest::Manifest;
+use crate::manifest::{LocalConfig, Manifest};
 
 #[cfg(test)]
 mod tests;
 
 pub struct CloneResult {
     pub repo_dir: PathBuf,
+    pub config: LocalConfig,
     pub manifest: Manifest,
 }
 
-/// Initialize rootrat by setting the repo directory.
-pub fn execute(repo_dir: &Path, manifest: &mut Manifest) -> Result<()> {
+/// Initialize rootrat by creating a local config pointing to the given repo directory.
+pub fn execute(repo_dir: &Path) -> Result<LocalConfig> {
     if !repo_dir.exists() {
         bail!("directory does not exist: {}", repo_dir.display());
     }
 
-    manifest.repo = Some(Manifest::to_display_path(repo_dir)?);
-
-    Ok(())
+    Ok(LocalConfig {
+        repo: Manifest::to_display_path(repo_dir)?,
+    })
 }
 
 /// Normalize a git URL. Adds https:// if no protocol is specified.
@@ -38,7 +39,7 @@ pub fn normalize_url(url: &str) -> String {
     }
 }
 
-/// Clone a repo from a URL into `target_dir`, load the manifest, and set the repo path.
+/// Clone a repo from a URL into `target_dir`, load the manifest, and create a local config.
 pub fn clone_and_init(url: &str, target_dir: &Path) -> Result<CloneResult> {
     let normalized = normalize_url(url);
 
@@ -70,8 +71,14 @@ pub fn clone_and_init(url: &str, target_dir: &Path) -> Result<CloneResult> {
         );
     }
 
-    let mut manifest = Manifest::load(&manifest_path)?;
-    manifest.repo = Some(Manifest::to_display_path(&repo_dir)?);
+    let manifest = Manifest::load(&manifest_path)?;
+    let config = LocalConfig {
+        repo: Manifest::to_display_path(&repo_dir)?,
+    };
 
-    Ok(CloneResult { repo_dir, manifest })
+    Ok(CloneResult {
+        repo_dir,
+        config,
+        manifest,
+    })
 }

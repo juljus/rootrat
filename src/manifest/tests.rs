@@ -3,18 +3,67 @@ use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
 
+// -- LocalConfig tests --
+
 #[test]
-fn new_manifest_has_empty_files_and_no_repo() {
-    let manifest = Manifest::new();
-    assert!(manifest.files.is_empty());
-    assert!(manifest.repo.is_none());
+fn local_config_default_path_is_in_home_config() {
+    let path = LocalConfig::default_path();
+    let home = dirs::home_dir().unwrap();
+    assert_eq!(path, home.join(".config/rootrat/rootrat.toml"));
 }
 
 #[test]
-fn manifest_with_repo() {
-    let mut manifest = Manifest::new();
-    manifest.repo = Some("/Users/juljus/dotfiles".to_string());
-    assert_eq!(manifest.repo.unwrap(), "/Users/juljus/dotfiles");
+fn local_config_save_and_load_roundtrip() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("rootrat.toml");
+
+    let config = LocalConfig {
+        repo: "~/Projects/dotfiles".to_string(),
+    };
+    config.save(&config_path).unwrap();
+
+    let loaded = LocalConfig::load(&config_path).unwrap();
+    assert_eq!(config, loaded);
+}
+
+#[test]
+fn local_config_saved_toml_is_readable() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("rootrat.toml");
+
+    let config = LocalConfig {
+        repo: "~/Projects/dotfiles".to_string(),
+    };
+    config.save(&config_path).unwrap();
+
+    let content = fs::read_to_string(&config_path).unwrap();
+    assert!(content.contains("repo"));
+    assert!(content.contains("~/Projects/dotfiles"));
+    assert!(!content.contains("[files]"));
+}
+
+#[test]
+fn local_config_repo_dir_expands_tilde() {
+    let config = LocalConfig {
+        repo: "~/Projects/dotfiles".to_string(),
+    };
+    let home = dirs::home_dir().unwrap();
+    assert_eq!(config.repo_dir(), home.join("Projects/dotfiles"));
+}
+
+#[test]
+fn local_config_load_nonexistent_returns_error() {
+    let result = LocalConfig::load(Path::new("/nonexistent/rootrat.toml"));
+    assert!(result.is_err());
+}
+
+// -- Manifest tests --
+
+#[test]
+fn new_manifest_has_empty_maps() {
+    let manifest = Manifest::new();
+    assert!(manifest.files.is_empty());
+    assert!(manifest.directories.is_empty());
 }
 
 #[test]
@@ -86,7 +135,6 @@ fn save_and_load_roundtrip() {
     let manifest_path = dir.path().join("rootrat.toml");
 
     let mut manifest = Manifest::new();
-    manifest.repo = Some("/Users/juljus/dotfiles".to_string());
     manifest.files.insert(
         "home/.claude/CLAUDE.md".to_string(),
         "~/.claude/CLAUDE.md".to_string(),
@@ -103,29 +151,11 @@ fn save_and_load_roundtrip() {
 }
 
 #[test]
-fn save_and_load_roundtrip_without_repo() {
-    let dir = TempDir::new().unwrap();
-    let manifest_path = dir.path().join("rootrat.toml");
-
-    let mut manifest = Manifest::new();
-    manifest.files.insert(
-        "home/.claude/CLAUDE.md".to_string(),
-        "~/.claude/CLAUDE.md".to_string(),
-    );
-
-    manifest.save(&manifest_path).unwrap();
-
-    let loaded = Manifest::load(&manifest_path).unwrap();
-    assert_eq!(manifest, loaded);
-}
-
-#[test]
 fn saved_toml_is_readable() {
     let dir = TempDir::new().unwrap();
     let manifest_path = dir.path().join("rootrat.toml");
 
     let mut manifest = Manifest::new();
-    manifest.repo = Some("/Users/juljus/dotfiles".to_string());
     manifest.files.insert(
         "home/.claude/CLAUDE.md".to_string(),
         "~/.claude/CLAUDE.md".to_string(),
@@ -134,8 +164,6 @@ fn saved_toml_is_readable() {
     manifest.save(&manifest_path).unwrap();
 
     let content = fs::read_to_string(&manifest_path).unwrap();
-    assert!(content.contains("repo"));
-    assert!(content.contains("/Users/juljus/dotfiles"));
     assert!(content.contains("[files]"));
     assert!(content.contains("~/.claude/CLAUDE.md"));
 }
@@ -147,19 +175,29 @@ fn load_nonexistent_file_returns_error() {
 }
 
 #[test]
-fn default_path_is_in_home_config() {
-    let path = Manifest::default_path();
-    let home = dirs::home_dir().unwrap();
-    assert_eq!(path, home.join(".config/rootrat/rootrat.toml"));
+fn load_from_repo_returns_empty_when_missing() {
+    let dir = TempDir::new().unwrap();
+    let manifest = Manifest::load_from_repo(dir.path()).unwrap();
+    assert!(manifest.files.is_empty());
+    assert!(manifest.directories.is_empty());
+}
+
+#[test]
+fn save_to_repo_and_load_from_repo() {
+    let dir = TempDir::new().unwrap();
+    let mut manifest = Manifest::new();
+    manifest.files.insert(
+        "home/.testrc".to_string(),
+        "~/.testrc".to_string(),
+    );
+
+    manifest.save_to_repo(dir.path()).unwrap();
+
+    let loaded = Manifest::load_from_repo(dir.path()).unwrap();
+    assert_eq!(manifest, loaded);
 }
 
 // -- Directory support tests --
-
-#[test]
-fn new_manifest_has_empty_directories() {
-    let manifest = Manifest::new();
-    assert!(manifest.directories.is_empty());
-}
 
 #[test]
 fn add_directory_creates_mapping() {
@@ -227,7 +265,6 @@ fn save_and_load_roundtrip_with_directories() {
     let manifest_path = dir.path().join("rootrat.toml");
 
     let mut manifest = Manifest::new();
-    manifest.repo = Some("/Users/juljus/dotfiles".to_string());
     manifest.files.insert(
         "home/.claude/CLAUDE.md".to_string(),
         "~/.claude/CLAUDE.md".to_string(),
@@ -273,6 +310,18 @@ fn load_manifest_without_directories_section() {
     let loaded = Manifest::load(&manifest_path).unwrap();
     assert!(loaded.directories.is_empty());
     assert_eq!(loaded.files.len(), 1);
+}
+
+#[test]
+fn load_empty_manifest() {
+    let dir = TempDir::new().unwrap();
+    let manifest_path = dir.path().join("rootrat.toml");
+
+    fs::write(&manifest_path, "").unwrap();
+
+    let loaded = Manifest::load(&manifest_path).unwrap();
+    assert!(loaded.files.is_empty());
+    assert!(loaded.directories.is_empty());
 }
 
 // -- Remove tests --

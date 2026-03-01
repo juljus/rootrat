@@ -1,9 +1,9 @@
 mod commands;
 mod manifest;
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
-use manifest::Manifest;
+use manifest::{LocalConfig, Manifest};
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -49,12 +49,12 @@ fn resolve_path(path: &str) -> Result<PathBuf> {
     Ok(std::fs::canonicalize(Manifest::expand_tilde(path))?)
 }
 
-/// Get the repo dir from the manifest, or bail.
-fn repo_dir(manifest: &Manifest) -> Result<PathBuf> {
-    match &manifest.repo {
-        Some(r) => Ok(Manifest::expand_tilde(r)),
-        None => bail!("no repo configured -- run `rootrat init` first"),
-    }
+/// Load local config and manifest from the repo.
+fn load_config_and_manifest() -> Result<(PathBuf, Manifest)> {
+    let config = LocalConfig::load_default()?;
+    let repo = config.repo_dir();
+    let manifest = Manifest::load_from_repo(&repo)?;
+    Ok((repo, manifest))
 }
 
 fn main() -> Result<()> {
@@ -63,17 +63,15 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Add { path } => {
             let system_path = resolve_path(&path)?;
-            let mut manifest = Manifest::load_or_create()?;
-            let repo = repo_dir(&manifest)?;
+            let (repo, mut manifest) = load_config_and_manifest()?;
 
             commands::add::execute(&system_path, &repo, &mut manifest)?;
-            manifest.save_default()?;
+            manifest.save_to_repo(&repo)?;
 
             println!("added: {}", system_path.display());
         }
         Commands::Apply => {
-            let manifest = Manifest::load_or_create()?;
-            let repo = repo_dir(&manifest)?;
+            let (repo, manifest) = load_config_and_manifest()?;
 
             use commands::apply::ApplyState;
             let entries = commands::apply::plan(&repo, &manifest)?;
@@ -137,8 +135,7 @@ fn main() -> Result<()> {
             println!("done");
         }
         Commands::Collect => {
-            let manifest = Manifest::load_or_create()?;
-            let repo = repo_dir(&manifest)?;
+            let (repo, manifest) = load_config_and_manifest()?;
 
             use commands::collect::CollectState;
             let entries = commands::collect::plan(&repo, &manifest)?;
@@ -202,8 +199,7 @@ fn main() -> Result<()> {
             println!("done");
         }
         Commands::Diff { path } => {
-            let manifest = Manifest::load_or_create()?;
-            let repo = repo_dir(&manifest)?;
+            let (repo, manifest) = load_config_and_manifest()?;
 
             let entries = commands::diff::execute(&repo, &manifest, path.as_deref())?;
 
@@ -220,20 +216,23 @@ fn main() -> Result<()> {
         Commands::Rm { path } => {
             let expanded = Manifest::expand_tilde(&path);
             let system_path = std::fs::canonicalize(&expanded).unwrap_or(expanded);
-            let mut manifest = Manifest::load_or_create()?;
-            let repo = repo_dir(&manifest)?;
+            let (repo, mut manifest) = load_config_and_manifest()?;
 
             commands::rm::execute(&system_path, &repo, &mut manifest)?;
-            manifest.save_default()?;
+            manifest.save_to_repo(&repo)?;
 
             println!("removed: {}", system_path.display());
         }
         Commands::Init { url: None } => {
             let dir = std::env::current_dir()?;
-            let mut manifest = Manifest::load_or_create()?;
+            let config = commands::init::execute(&dir)?;
+            config.save_default()?;
 
-            commands::init::execute(&dir, &mut manifest)?;
-            manifest.save_default()?;
+            // Create empty manifest in repo if it doesn't exist yet
+            let manifest_path = dir.join("rootrat.toml");
+            if !manifest_path.exists() {
+                Manifest::new().save(&manifest_path)?;
+            }
 
             println!("initialized rootrat repo at: {}", dir.display());
         }
@@ -258,12 +257,11 @@ fn main() -> Result<()> {
                 println!("{:>20}  {}", marker, entry.system_path);
             }
 
-            // Save manifest after successful apply
-            result.manifest.save_default()?;
+            // Save local config after successful apply
+            result.config.save_default()?;
         }
         Commands::Status => {
-            let manifest = Manifest::load_or_create()?;
-            let repo = repo_dir(&manifest)?;
+            let (repo, manifest) = load_config_and_manifest()?;
 
             let entries = commands::status::execute(&repo, &manifest)?;
 

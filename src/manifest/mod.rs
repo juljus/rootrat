@@ -7,46 +7,71 @@ use std::path::{Path, PathBuf};
 #[cfg(test)]
 mod tests;
 
+// -- LocalConfig: repo pointer at ~/.config/rootrat/rootrat.toml --
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct LocalConfig {
+    pub repo: String,
+}
+
+impl LocalConfig {
+    /// Returns the default config path: ~/.config/rootrat/rootrat.toml
+    pub fn default_path() -> PathBuf {
+        let home = dirs::home_dir().expect("could not determine home directory");
+        home.join(".config").join("rootrat").join("rootrat.toml")
+    }
+
+    /// Load from a specific path.
+    pub fn load(path: &Path) -> Result<Self> {
+        let content = fs::read_to_string(path)?;
+        let config: Self = toml::from_str(&content)?;
+        Ok(config)
+    }
+
+    /// Load from the default path, or bail if not initialized.
+    pub fn load_default() -> Result<Self> {
+        let path = Self::default_path();
+        if !path.exists() {
+            bail!("not initialized -- run `rootrat init` first");
+        }
+        Self::load(&path)
+    }
+
+    /// Save to a specific path, creating parent dirs if needed.
+    pub fn save(&self, path: &Path) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let content = toml::to_string(self)?;
+        fs::write(path, content)?;
+        Ok(())
+    }
+
+    /// Save to the default path.
+    pub fn save_default(&self) -> Result<()> {
+        self.save(&Self::default_path())
+    }
+
+    /// Resolve the repo path to an absolute PathBuf.
+    pub fn repo_dir(&self) -> PathBuf {
+        Manifest::expand_tilde(&self.repo)
+    }
+}
+
+// -- Manifest: file mappings at <repo>/rootrat.toml --
+
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Manifest {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub repo: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub files: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub directories: BTreeMap<String, String>,
 }
 
 impl Manifest {
-    /// Returns the default config path: ~/.config/rootrat/rootrat.toml
-    /// Always uses ~/.config/ regardless of OS.
-    pub fn default_path() -> PathBuf {
-        let home = dirs::home_dir().expect("could not determine home directory");
-        home.join(".config").join("rootrat").join("rootrat.toml")
-    }
-
-    /// Load from the default path, or create a new manifest if it doesn't exist yet.
-    pub fn load_or_create() -> Result<Self> {
-        let path = Self::default_path();
-        if path.exists() {
-            Self::load(&path)
-        } else {
-            Ok(Self::new())
-        }
-    }
-
-    /// Save to the default path, creating parent dirs if needed.
-    pub fn save_default(&self) -> Result<()> {
-        let path = Self::default_path();
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        self.save(&path)
-    }
-
     /// Create a new empty manifest.
     pub fn new() -> Self {
         Self {
-            repo: None,
             files: BTreeMap::new(),
             directories: BTreeMap::new(),
         }
@@ -64,6 +89,21 @@ impl Manifest {
         let content = toml::to_string(self)?;
         fs::write(path, content)?;
         Ok(())
+    }
+
+    /// Load the manifest from `<repo_dir>/rootrat.toml`, or return empty if not found.
+    pub fn load_from_repo(repo_dir: &Path) -> Result<Self> {
+        let path = repo_dir.join("rootrat.toml");
+        if path.exists() {
+            Self::load(&path)
+        } else {
+            Ok(Self::new())
+        }
+    }
+
+    /// Save the manifest to `<repo_dir>/rootrat.toml`.
+    pub fn save_to_repo(&self, repo_dir: &Path) -> Result<()> {
+        self.save(&repo_dir.join("rootrat.toml"))
     }
 
     /// Add a file or directory mapping. `system_path` is the absolute path on the machine.
@@ -138,3 +178,4 @@ impl Manifest {
         }
     }
 }
+
