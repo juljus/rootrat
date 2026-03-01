@@ -12,6 +12,8 @@ pub struct Manifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repo: Option<String>,
     pub files: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub directories: BTreeMap<String, String>,
 }
 
 impl Manifest {
@@ -46,6 +48,7 @@ impl Manifest {
         Self {
             repo: None,
             files: BTreeMap::new(),
+            directories: BTreeMap::new(),
         }
     }
 
@@ -63,12 +66,17 @@ impl Manifest {
         Ok(())
     }
 
-    /// Add a file mapping. `system_path` is the absolute path on the machine.
+    /// Add a file or directory mapping. `system_path` is the absolute path on the machine.
+    /// Automatically detects whether the path is a directory or file.
     /// Returns the derived repo path.
     pub fn add(&mut self, system_path: &Path) -> Result<String> {
         let repo_path = Self::derive_repo_path(system_path)?;
         let display_path = Self::to_display_path(system_path)?;
-        self.files.insert(repo_path.clone(), display_path);
+        if system_path.is_dir() {
+            self.directories.insert(repo_path.clone(), display_path);
+        } else {
+            self.files.insert(repo_path.clone(), display_path);
+        }
         Ok(repo_path)
     }
 

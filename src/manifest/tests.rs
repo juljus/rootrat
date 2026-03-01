@@ -152,3 +152,125 @@ fn default_path_is_in_home_config() {
     let home = dirs::home_dir().unwrap();
     assert_eq!(path, home.join(".config/rootrat/rootrat.toml"));
 }
+
+// -- Directory support tests --
+
+#[test]
+fn new_manifest_has_empty_directories() {
+    let manifest = Manifest::new();
+    assert!(manifest.directories.is_empty());
+}
+
+#[test]
+fn add_directory_creates_mapping() {
+    let home = dirs::home_dir().unwrap();
+    let nvim_dir = home.join(".config/nvim");
+    fs::create_dir_all(&nvim_dir).unwrap();
+
+    let mut manifest = Manifest::new();
+    let repo_path = manifest.add(&nvim_dir).unwrap();
+
+    assert_eq!(repo_path, "home/.config/nvim");
+    assert_eq!(
+        manifest.directories.get("home/.config/nvim").unwrap(),
+        "~/.config/nvim"
+    );
+    assert!(manifest.files.is_empty());
+
+    // Cleanup
+    fs::remove_dir(&nvim_dir).ok();
+}
+
+#[test]
+fn add_directory_system_path_creates_mapping() {
+    let tmp = TempDir::new().unwrap();
+    let system_dir = tmp.path().join("etc/nginx");
+    fs::create_dir_all(&system_dir).unwrap();
+
+    let mut manifest = Manifest::new();
+    let repo_path = manifest.add(&system_dir).unwrap();
+
+    // Should go into directories, not files
+    assert!(manifest.directories.contains_key(&repo_path));
+    assert!(manifest.files.is_empty());
+}
+
+#[test]
+fn add_file_still_goes_to_files() {
+    let tmp = TempDir::new().unwrap();
+    let file_path = tmp.path().join("test.conf");
+    fs::write(&file_path, "content").unwrap();
+
+    let mut manifest = Manifest::new();
+    manifest.add(&file_path).unwrap();
+
+    assert!(manifest.directories.is_empty());
+    assert_eq!(manifest.files.len(), 1);
+}
+
+#[test]
+fn add_directory_duplicate_is_idempotent() {
+    let tmp = TempDir::new().unwrap();
+    let dir_path = tmp.path().join("mydir");
+    fs::create_dir(&dir_path).unwrap();
+
+    let mut manifest = Manifest::new();
+    manifest.add(&dir_path).unwrap();
+    manifest.add(&dir_path).unwrap();
+
+    assert_eq!(manifest.directories.len(), 1);
+}
+
+#[test]
+fn save_and_load_roundtrip_with_directories() {
+    let dir = TempDir::new().unwrap();
+    let manifest_path = dir.path().join("rootrat.toml");
+
+    let mut manifest = Manifest::new();
+    manifest.repo = Some("/Users/juljus/dotfiles".to_string());
+    manifest.files.insert(
+        "home/.claude/CLAUDE.md".to_string(),
+        "~/.claude/CLAUDE.md".to_string(),
+    );
+    manifest.directories.insert(
+        "home/.config/nvim".to_string(),
+        "~/.config/nvim".to_string(),
+    );
+
+    manifest.save(&manifest_path).unwrap();
+
+    let loaded = Manifest::load(&manifest_path).unwrap();
+    assert_eq!(manifest, loaded);
+}
+
+#[test]
+fn saved_toml_with_directories_is_readable() {
+    let dir = TempDir::new().unwrap();
+    let manifest_path = dir.path().join("rootrat.toml");
+
+    let mut manifest = Manifest::new();
+    manifest.directories.insert(
+        "home/.config/nvim".to_string(),
+        "~/.config/nvim".to_string(),
+    );
+
+    manifest.save(&manifest_path).unwrap();
+
+    let content = fs::read_to_string(&manifest_path).unwrap();
+    assert!(content.contains("[directories]"));
+    assert!(content.contains("~/.config/nvim"));
+}
+
+#[test]
+fn load_manifest_without_directories_section() {
+    let dir = TempDir::new().unwrap();
+    let manifest_path = dir.path().join("rootrat.toml");
+
+    // Write a manifest without [directories] -- backward compat
+    let content = "[files]\n\"home/.claude/CLAUDE.md\" = \"~/.claude/CLAUDE.md\"\n";
+    fs::write(&manifest_path, content).unwrap();
+
+    let loaded = Manifest::load(&manifest_path).unwrap();
+    assert!(loaded.directories.is_empty());
+    assert_eq!(loaded.files.len(), 1);
+}
