@@ -67,6 +67,7 @@ fn main() -> Result<()> {
 
             commands::add::execute(&system_path, &repo, &mut manifest)?;
             manifest.save_to_repo(&repo)?;
+            commands::git_commit(&repo, &format!("add: {}", system_path.display()))?;
 
             println!("added: {}", system_path.display());
         }
@@ -196,6 +197,7 @@ fn main() -> Result<()> {
             }
 
             commands::collect::collect_entries(&entries)?;
+            commands::git_commit(&repo, "collect")?;
             println!("done");
         }
         Commands::Diff { path } => {
@@ -220,6 +222,7 @@ fn main() -> Result<()> {
 
             commands::rm::execute(&system_path, &repo, &mut manifest)?;
             manifest.save_to_repo(&repo)?;
+            commands::git_commit(&repo, &format!("rm: {}", system_path.display()))?;
 
             println!("removed: {}", system_path.display());
         }
@@ -233,6 +236,9 @@ fn main() -> Result<()> {
             if !manifest_path.exists() {
                 Manifest::new().save(&manifest_path)?;
             }
+
+            commands::git_init(&dir)?;
+            commands::git_commit(&dir, "init")?;
 
             println!("initialized rootrat repo at: {}", dir.display());
         }
