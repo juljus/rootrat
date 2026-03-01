@@ -27,8 +27,11 @@ enum Commands {
         /// Only show diff for this file
         path: Option<String>,
     },
-    /// Initialize rootrat with the current directory as the repo
-    Init,
+    /// Initialize rootrat (optionally clone from a git URL)
+    Init {
+        /// Git URL to clone from (e.g. github.com/user/dotfiles)
+        url: Option<String>,
+    },
     /// Show status of tracked files
     Status,
 }
@@ -97,7 +100,7 @@ fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Init => {
+        Commands::Init { url: None } => {
             let dir = std::env::current_dir()?;
             let mut manifest = Manifest::load_or_create()?;
 
@@ -105,6 +108,29 @@ fn main() -> Result<()> {
             manifest.save_default()?;
 
             println!("initialized rootrat repo at: {}", dir.display());
+        }
+        Commands::Init { url: Some(url) } => {
+            let dir = std::env::current_dir()?;
+            let result = commands::init::clone_and_init(&url, &dir)?;
+
+            println!("cloned to: {}", result.repo_dir.display());
+
+            // Apply all files from the cloned repo
+            let entries = commands::apply::execute(&result.repo_dir, &result.manifest)?;
+
+            use commands::apply::ApplyState;
+            for entry in &entries {
+                let marker = match entry.state {
+                    ApplyState::Created => "  created",
+                    ApplyState::Updated => "  updated",
+                    ApplyState::Unchanged => "  unchanged",
+                    ApplyState::MissingFromRepo => "  missing (repo)",
+                };
+                println!("{:>20}  {}", marker, entry.system_path);
+            }
+
+            // Save manifest after successful apply
+            result.manifest.save_default()?;
         }
         Commands::Status => {
             let manifest = Manifest::load_or_create()?;
