@@ -153,3 +153,40 @@ fn duplicate_directory_add_updates_content() {
     assert_eq!(fs::read_to_string(copied).unwrap(), "v2");
     assert_eq!(manifest.directories.len(), 1);
 }
+
+#[test]
+fn add_directory_skips_ignored_files() {
+    let (repo_dir, source_dir) = setup();
+    let dir = create_dir_with_files(
+        source_dir.path(),
+        "myconfig",
+        &[("init.lua", "config"), (".DS_Store", "junk"), ("Thumbs.db", "junk")],
+    );
+    let mut manifest = Manifest::new();
+
+    execute(&dir, repo_dir.path(), &mut manifest).unwrap();
+
+    let repo_path = Manifest::derive_repo_path(&dir).unwrap();
+    let repo_dest = repo_dir.path().join(&repo_path);
+    assert!(repo_dest.join("init.lua").exists());
+    assert!(!repo_dest.join(".DS_Store").exists());
+    assert!(!repo_dest.join("Thumbs.db").exists());
+}
+
+#[test]
+fn add_directory_skips_git_dir() {
+    let (repo_dir, source_dir) = setup();
+    let dir = create_dir_with_files(
+        source_dir.path(),
+        "myconfig",
+        &[("init.lua", "config"), (".git/HEAD", "ref: refs/heads/main")],
+    );
+    let mut manifest = Manifest::new();
+
+    execute(&dir, repo_dir.path(), &mut manifest).unwrap();
+
+    let repo_path = Manifest::derive_repo_path(&dir).unwrap();
+    let repo_dest = repo_dir.path().join(&repo_path);
+    assert!(repo_dest.join("init.lua").exists());
+    assert!(!repo_dest.join(".git").exists());
+}

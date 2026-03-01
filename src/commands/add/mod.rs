@@ -17,7 +17,7 @@ pub fn execute(system_path: &Path, repo_dir: &Path, manifest: &mut Manifest) -> 
     let dest = repo_dir.join(&repo_path);
 
     if system_path.is_dir() {
-        copy_dir_recursive(system_path, &dest)?;
+        copy_dir_recursive(system_path, &dest, &manifest.ignore)?;
     } else {
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent)?;
@@ -28,14 +28,18 @@ pub fn execute(system_path: &Path, repo_dir: &Path, manifest: &mut Manifest) -> 
     Ok(())
 }
 
-fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
+fn copy_dir_recursive(src: &Path, dst: &Path, ignore: &[String]) -> Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
         let entry = entry?;
+        let name = entry.file_name();
+        if ignore.iter().any(|i| i.as_str() == name) {
+            continue;
+        }
         let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
+        let dst_path = dst.join(name);
         if src_path.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
+            copy_dir_recursive(&src_path, &dst_path, ignore)?;
         } else {
             fs::copy(&src_path, &dst_path)?;
         }
