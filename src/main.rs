@@ -245,26 +245,10 @@ fn main() -> Result<()> {
         Commands::Init { url: Some(url) } => {
             let dir = std::env::current_dir()?;
             let result = commands::init::clone_and_init(&url, &dir)?;
+            result.config.save_default()?;
 
             println!("cloned to: {}", result.repo_dir.display());
-
-            // Apply all files from the cloned repo (non-interactive, skips deletes)
-            let entries = commands::apply::execute(&result.repo_dir, &result.manifest)?;
-
-            use commands::apply::ApplyState;
-            for entry in &entries {
-                let marker = match entry.state {
-                    ApplyState::Created => "  created",
-                    ApplyState::Updated => "  updated",
-                    ApplyState::Unchanged => "  unchanged",
-                    ApplyState::Deleted => "  skipped (delete)",
-                    ApplyState::MissingFromRepo => "  missing (repo)",
-                };
-                println!("{:>20}  {}", marker, entry.system_path);
-            }
-
-            // Save local config after successful apply
-            result.config.save_default()?;
+            println!("run `rootrat apply` to apply tracked files");
         }
         Commands::Status => {
             let (repo, manifest) = load_config_and_manifest()?;

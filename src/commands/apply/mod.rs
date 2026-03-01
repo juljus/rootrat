@@ -92,32 +92,6 @@ pub fn apply_entries(entries: &[ApplyEntry]) -> Result<()> {
     Ok(())
 }
 
-/// Non-interactive apply: plan + apply, skipping deletes for safety.
-/// Used by init clone where auto-deleting system files would be dangerous.
-pub fn execute(repo_dir: &Path, manifest: &Manifest) -> Result<Vec<ApplyEntry>> {
-    let entries = plan(repo_dir, manifest)?;
-    // Only apply non-destructive changes
-    let safe: Vec<&ApplyEntry> = entries
-        .iter()
-        .filter(|e| e.state != ApplyState::Deleted)
-        .collect();
-    for entry in safe {
-        match entry.state {
-            ApplyState::Created => {
-                if let Some(parent) = entry.system_file.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                fs::copy(&entry.repo_file, &entry.system_file)?;
-            }
-            ApplyState::Updated => {
-                fs::copy(&entry.repo_file, &entry.system_file)?;
-            }
-            _ => {}
-        }
-    }
-    Ok(entries)
-}
-
 fn plan_file(repo_file: &Path, system_file: &Path, display: &str) -> Result<ApplyEntry> {
     let state = if !repo_file.exists() {
         ApplyState::MissingFromRepo

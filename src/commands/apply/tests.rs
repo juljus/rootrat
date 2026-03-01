@@ -10,91 +10,93 @@ fn create_file(path: &Path, content: &str) {
     fs::write(path, content).unwrap();
 }
 
-#[test]
-fn applies_file_to_system() {
-    let repo_dir = TempDir::new().unwrap();
-    let system_dir = TempDir::new().unwrap();
-    let system_path = system_dir.path().join("config.toml");
+fn setup_tracked_file(
+    repo_dir: &Path,
+    system_dir: &Path,
+    name: &str,
+    repo_content: Option<&str>,
+    system_content: Option<&str>,
+) -> Manifest {
+    let system_path = system_dir.join(name);
     let repo_path = Manifest::derive_repo_path(&system_path).unwrap();
 
-    create_file(&repo_dir.path().join(&repo_path), "repo content");
+    if let Some(content) = repo_content {
+        create_file(&repo_dir.join(&repo_path), content);
+    }
+    if let Some(content) = system_content {
+        create_file(&system_path, content);
+    }
 
     let mut manifest = Manifest::new();
     manifest
         .files
         .insert(repo_path, system_path.to_string_lossy().to_string());
+    manifest
+}
 
-    let results = execute(repo_dir.path(), &manifest).unwrap();
+// -- Individual file tests --
 
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].state, ApplyState::Created);
-    assert_eq!(fs::read_to_string(&system_path).unwrap(), "repo content");
+#[test]
+fn applies_file_to_system() {
+    let repo_dir = TempDir::new().unwrap();
+    let system_dir = TempDir::new().unwrap();
+    let manifest = setup_tracked_file(
+        repo_dir.path(), system_dir.path(), "config.toml",
+        Some("repo content"), None,
+    );
+
+    let entries = plan(repo_dir.path(), &manifest).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].state, ApplyState::Created);
+
+    apply_entries(&entries).unwrap();
+    assert_eq!(fs::read_to_string(system_dir.path().join("config.toml")).unwrap(), "repo content");
 }
 
 #[test]
 fn overwrites_existing_file() {
     let repo_dir = TempDir::new().unwrap();
     let system_dir = TempDir::new().unwrap();
-    let system_path = system_dir.path().join("config.toml");
-    let repo_path = Manifest::derive_repo_path(&system_path).unwrap();
-
-    create_file(&system_path, "old system content");
-    create_file(&repo_dir.path().join(&repo_path), "new repo content");
-
-    let mut manifest = Manifest::new();
-    manifest
-        .files
-        .insert(repo_path, system_path.to_string_lossy().to_string());
-
-    let results = execute(repo_dir.path(), &manifest).unwrap();
-
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].state, ApplyState::Updated);
-    assert_eq!(
-        fs::read_to_string(&system_path).unwrap(),
-        "new repo content"
+    let manifest = setup_tracked_file(
+        repo_dir.path(), system_dir.path(), "config.toml",
+        Some("new repo content"), Some("old system content"),
     );
+
+    let entries = plan(repo_dir.path(), &manifest).unwrap();
+    assert_eq!(entries[0].state, ApplyState::Updated);
+
+    apply_entries(&entries).unwrap();
+    assert_eq!(fs::read_to_string(system_dir.path().join("config.toml")).unwrap(), "new repo content");
 }
 
 #[test]
 fn skips_unchanged_files() {
     let repo_dir = TempDir::new().unwrap();
     let system_dir = TempDir::new().unwrap();
-    let system_path = system_dir.path().join("config.toml");
-    let repo_path = Manifest::derive_repo_path(&system_path).unwrap();
+    let manifest = setup_tracked_file(
+        repo_dir.path(), system_dir.path(), "config.toml",
+        Some("same content"), Some("same content"),
+    );
 
-    create_file(&system_path, "same content");
-    create_file(&repo_dir.path().join(&repo_path), "same content");
-
-    let mut manifest = Manifest::new();
-    manifest
-        .files
-        .insert(repo_path, system_path.to_string_lossy().to_string());
-
-    let results = execute(repo_dir.path(), &manifest).unwrap();
-
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].state, ApplyState::Unchanged);
+    let entries = plan(repo_dir.path(), &manifest).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].state, ApplyState::Unchanged);
 }
 
 #[test]
 fn creates_parent_dirs_on_system() {
     let repo_dir = TempDir::new().unwrap();
     let system_dir = TempDir::new().unwrap();
-    let system_path = system_dir.path().join("deep/nested/dir/config.toml");
-    let repo_path = Manifest::derive_repo_path(&system_path).unwrap();
+    let manifest = setup_tracked_file(
+        repo_dir.path(), system_dir.path(), "deep/nested/dir/config.toml",
+        Some("nested content"), None,
+    );
 
-    create_file(&repo_dir.path().join(&repo_path), "nested content");
-
-    let mut manifest = Manifest::new();
-    manifest
-        .files
-        .insert(repo_path, system_path.to_string_lossy().to_string());
-
-    execute(repo_dir.path(), &manifest).unwrap();
+    let entries = plan(repo_dir.path(), &manifest).unwrap();
+    apply_entries(&entries).unwrap();
 
     assert_eq!(
-        fs::read_to_string(&system_path).unwrap(),
+        fs::read_to_string(system_dir.path().join("deep/nested/dir/config.toml")).unwrap(),
         "nested content"
     );
 }
@@ -103,20 +105,14 @@ fn creates_parent_dirs_on_system() {
 fn missing_repo_file_reports_error_state() {
     let repo_dir = TempDir::new().unwrap();
     let system_dir = TempDir::new().unwrap();
-    let system_path = system_dir.path().join("config.toml");
-    let repo_path = Manifest::derive_repo_path(&system_path).unwrap();
+    let manifest = setup_tracked_file(
+        repo_dir.path(), system_dir.path(), "config.toml",
+        None, None,
+    );
 
-    // Don't create the repo file
-    let mut manifest = Manifest::new();
-    manifest
-        .files
-        .insert(repo_path, system_path.to_string_lossy().to_string());
-
-    let results = execute(repo_dir.path(), &manifest).unwrap();
-
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].state, ApplyState::MissingFromRepo);
-    assert!(!system_path.exists());
+    let entries = plan(repo_dir.path(), &manifest).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].state, ApplyState::MissingFromRepo);
 }
 
 #[test]
@@ -124,25 +120,22 @@ fn applies_multiple_files() {
     let repo_dir = TempDir::new().unwrap();
     let system_dir = TempDir::new().unwrap();
 
-    let mut manifest = Manifest::new();
-
     let path1 = system_dir.path().join("a.conf");
-    let rp1 = Manifest::derive_repo_path(&path1).unwrap();
-    create_file(&repo_dir.path().join(&rp1), "content a");
-    manifest
-        .files
-        .insert(rp1, path1.to_string_lossy().to_string());
-
     let path2 = system_dir.path().join("b.conf");
+    let rp1 = Manifest::derive_repo_path(&path1).unwrap();
     let rp2 = Manifest::derive_repo_path(&path2).unwrap();
+
+    create_file(&repo_dir.path().join(&rp1), "content a");
     create_file(&repo_dir.path().join(&rp2), "content b");
-    manifest
-        .files
-        .insert(rp2, path2.to_string_lossy().to_string());
 
-    let results = execute(repo_dir.path(), &manifest).unwrap();
+    let mut manifest = Manifest::new();
+    manifest.files.insert(rp1, path1.to_string_lossy().to_string());
+    manifest.files.insert(rp2, path2.to_string_lossy().to_string());
 
-    assert_eq!(results.len(), 2);
+    let entries = plan(repo_dir.path(), &manifest).unwrap();
+    apply_entries(&entries).unwrap();
+
+    assert_eq!(entries.len(), 2);
     assert_eq!(fs::read_to_string(&path1).unwrap(), "content a");
     assert_eq!(fs::read_to_string(&path2).unwrap(), "content b");
 }
@@ -152,9 +145,8 @@ fn empty_manifest_returns_empty() {
     let repo_dir = TempDir::new().unwrap();
     let manifest = Manifest::new();
 
-    let results = execute(repo_dir.path(), &manifest).unwrap();
-
-    assert!(results.is_empty());
+    let entries = plan(repo_dir.path(), &manifest).unwrap();
+    assert!(entries.is_empty());
 }
 
 // -- Directory support tests --
@@ -194,19 +186,14 @@ fn applies_directory_to_system() {
         &[],
     );
 
-    let results = execute(repo_dir.path(), &manifest).unwrap();
+    let entries = plan(repo_dir.path(), &manifest).unwrap();
+    apply_entries(&entries).unwrap();
 
     let system_path = system_dir.path().join("nvim");
-    assert_eq!(
-        fs::read_to_string(system_path.join("init.lua")).unwrap(),
-        "config"
-    );
-    assert_eq!(
-        fs::read_to_string(system_path.join("lua/plugins.lua")).unwrap(),
-        "plugins"
-    );
-    assert_eq!(results.len(), 2);
-    assert!(results.iter().all(|e| e.state == ApplyState::Created));
+    assert_eq!(fs::read_to_string(system_path.join("init.lua")).unwrap(), "config");
+    assert_eq!(fs::read_to_string(system_path.join("lua/plugins.lua")).unwrap(), "plugins");
+    assert_eq!(entries.len(), 2);
+    assert!(entries.iter().all(|e| e.state == ApplyState::Created));
 }
 
 #[test]
@@ -222,10 +209,9 @@ fn directory_skips_unchanged_files() {
         files,
     );
 
-    let results = execute(repo_dir.path(), &manifest).unwrap();
-
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].state, ApplyState::Unchanged);
+    let entries = plan(repo_dir.path(), &manifest).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].state, ApplyState::Unchanged);
 }
 
 #[test]
@@ -240,12 +226,13 @@ fn directory_updates_modified_files() {
         &[("init.lua", "old version")],
     );
 
-    let results = execute(repo_dir.path(), &manifest).unwrap();
+    let entries = plan(repo_dir.path(), &manifest).unwrap();
+    apply_entries(&entries).unwrap();
 
     let system_path = system_dir.path().join("nvim/init.lua");
     assert_eq!(fs::read_to_string(system_path).unwrap(), "new version");
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].state, ApplyState::Updated);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].state, ApplyState::Updated);
 }
 
 // -- Plan / apply split tests --
@@ -254,7 +241,6 @@ fn directory_updates_modified_files() {
 fn plan_detects_deleted_directory_files() {
     let repo_dir = TempDir::new().unwrap();
     let system_dir = TempDir::new().unwrap();
-    // Repo has init.lua, system has init.lua + old-plugin.lua
     let manifest = setup_tracked_dir(
         repo_dir.path(),
         system_dir.path(),
@@ -272,22 +258,14 @@ fn plan_detects_deleted_directory_files() {
 
 #[test]
 fn plan_does_not_delete_individual_files() {
-    // Deleted state only applies to directory tracking, not individual files
     let repo_dir = TempDir::new().unwrap();
     let system_dir = TempDir::new().unwrap();
-    let system_path = system_dir.path().join("config.toml");
-    let repo_path = Manifest::derive_repo_path(&system_path).unwrap();
-
-    create_file(&repo_dir.path().join(&repo_path), "content");
-    create_file(&system_path, "content");
-
-    let mut manifest = Manifest::new();
-    manifest
-        .files
-        .insert(repo_path, system_path.to_string_lossy().to_string());
+    let manifest = setup_tracked_file(
+        repo_dir.path(), system_dir.path(), "config.toml",
+        Some("content"), Some("content"),
+    );
 
     let entries = plan(repo_dir.path(), &manifest).unwrap();
-
     assert!(entries.iter().all(|e| e.state != ApplyState::Deleted));
 }
 
@@ -305,7 +283,6 @@ fn apply_entries_deletes_files() {
     }];
 
     apply_entries(&entries).unwrap();
-
     assert!(!file_path.exists());
 }
 
@@ -324,29 +301,7 @@ fn apply_entries_creates_files() {
     }];
 
     apply_entries(&entries).unwrap();
-
     assert_eq!(fs::read_to_string(&system_file).unwrap(), "new content");
-}
-
-#[test]
-fn execute_skips_deletes() {
-    let repo_dir = TempDir::new().unwrap();
-    let system_dir = TempDir::new().unwrap();
-    // System has an extra file that repo doesn't
-    let manifest = setup_tracked_dir(
-        repo_dir.path(),
-        system_dir.path(),
-        "nvim",
-        &[("init.lua", "config")],
-        &[("init.lua", "config"), ("local-only.lua", "keep me")],
-    );
-
-    // execute is the non-interactive path -- should NOT delete
-    execute(repo_dir.path(), &manifest).unwrap();
-
-    let local_file = system_dir.path().join("nvim/local-only.lua");
-    assert!(local_file.exists());
-    assert_eq!(fs::read_to_string(local_file).unwrap(), "keep me");
 }
 
 #[test]
@@ -363,7 +318,6 @@ fn plan_and_apply_full_directory_flow() {
 
     let entries = plan(repo_dir.path(), &manifest).unwrap();
 
-    // Should have: init.lua=Updated, new.lua=Created, old.lua=Deleted
     let updated: Vec<_> = entries.iter().filter(|e| e.state == ApplyState::Updated).collect();
     let created: Vec<_> = entries.iter().filter(|e| e.state == ApplyState::Created).collect();
     let deleted: Vec<_> = entries.iter().filter(|e| e.state == ApplyState::Deleted).collect();
