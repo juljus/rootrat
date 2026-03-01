@@ -1,5 +1,6 @@
 pub mod add;
 pub mod apply;
+pub mod collect;
 pub mod diff;
 pub mod init;
 pub mod rm;

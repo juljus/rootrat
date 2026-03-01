@@ -23,6 +23,8 @@ enum Commands {
     },
     /// Apply tracked files from repo to system
     Apply,
+    /// Collect system changes into the repo
+    Collect,
     /// Show differences between repo and system files
     Diff {
         /// Only show diff for this file
@@ -132,6 +134,71 @@ fn main() -> Result<()> {
             }
 
             commands::apply::apply_entries(&entries)?;
+            println!("done");
+        }
+        Commands::Collect => {
+            let manifest = Manifest::load_or_create()?;
+            let repo = repo_dir(&manifest)?;
+
+            use commands::collect::CollectState;
+            let entries = commands::collect::plan(&repo, &manifest)?;
+
+            if entries.is_empty() {
+                println!("no files tracked");
+                return Ok(());
+            }
+
+            let created: Vec<_> = entries.iter().filter(|e| e.state == CollectState::Created).collect();
+            let updated: Vec<_> = entries.iter().filter(|e| e.state == CollectState::Updated).collect();
+            let deleted: Vec<_> = entries.iter().filter(|e| e.state == CollectState::Deleted).collect();
+            let missing: Vec<_> = entries.iter().filter(|e| e.state == CollectState::MissingFromSystem).collect();
+            let unchanged_count = entries.iter().filter(|e| e.state == CollectState::Unchanged).count();
+
+            if created.is_empty() && updated.is_empty() && deleted.is_empty() && missing.is_empty() {
+                println!("all {} files up to date", unchanged_count);
+                return Ok(());
+            }
+
+            if !created.is_empty() {
+                println!("  create:");
+                for entry in &created {
+                    println!("    {}", entry.system_path);
+                }
+            }
+            if !updated.is_empty() {
+                println!("  update:");
+                for entry in &updated {
+                    println!("    {}", entry.system_path);
+                }
+            }
+            if !deleted.is_empty() {
+                println!("  delete:");
+                for entry in &deleted {
+                    println!("    {}", entry.system_path);
+                }
+            }
+            if !missing.is_empty() {
+                println!("  missing (system):");
+                for entry in &missing {
+                    println!("    {}", entry.system_path);
+                }
+            }
+            if unchanged_count > 0 {
+                println!("  unchanged: {}", unchanged_count);
+            }
+
+            println!();
+            print!("proceed? [y/N] ");
+            std::io::stdout().flush()?;
+
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input)?;
+            if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
+                println!("aborted");
+                return Ok(());
+            }
+
+            commands::collect::collect_entries(&entries)?;
             println!("done");
         }
         Commands::Diff { path } => {
