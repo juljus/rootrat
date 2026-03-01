@@ -20,6 +20,8 @@ enum Commands {
         /// Path to the file to track
         path: String,
     },
+    /// Apply tracked files from repo to system
+    Apply,
     /// Show differences between repo and system files
     Diff {
         /// Only show diff for this file
@@ -57,6 +59,27 @@ fn main() -> Result<()> {
             manifest.save_default()?;
 
             println!("added: {}", system_path.display());
+        }
+        Commands::Apply => {
+            let manifest = Manifest::load_or_create()?;
+            let repo = repo_dir(&manifest)?;
+
+            let entries = commands::apply::execute(&repo, &manifest)?;
+
+            if entries.is_empty() {
+                println!("no files tracked");
+            } else {
+                use commands::apply::ApplyState;
+                for entry in &entries {
+                    let marker = match entry.state {
+                        ApplyState::Created => "  created",
+                        ApplyState::Updated => "  updated",
+                        ApplyState::Unchanged => "  unchanged",
+                        ApplyState::MissingFromRepo => "  missing (repo)",
+                    };
+                    println!("{:>20}  {}", marker, entry.system_path);
+                }
+            }
         }
         Commands::Diff { path } => {
             let manifest = Manifest::load_or_create()?;
