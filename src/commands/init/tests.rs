@@ -120,7 +120,7 @@ fn clone_from_url_creates_repo() {
 }
 
 #[test]
-fn clone_from_url_returns_config_and_manifest() {
+fn clone_from_url_returns_config() {
     let tmp = TempDir::new().unwrap();
     let remote = tmp.path().join("remote.git");
     create_test_remote(&remote);
@@ -130,6 +130,6 @@ fn clone_from_url_returns_config_and_manifest() {
 
     let result = clone_and_init(remote.to_str().unwrap(), &clone_dir).unwrap();
 
-    assert!(result.manifest.files.contains_key("home/.testrc"));
     assert!(!result.config.repo.is_empty());
+    assert!(result.repo_dir.join("rootrat.toml").exists());
 }

@@ -10,7 +10,6 @@ mod tests;
 pub struct CloneResult {
     pub repo_dir: PathBuf,
     pub config: LocalConfig,
-    pub manifest: Manifest,
 }
 
 /// Initialize rootrat by creating a local config pointing to the given repo directory.
@@ -71,14 +70,12 @@ pub fn clone_and_init(url: &str, target_dir: &Path) -> Result<CloneResult> {
         );
     }
 
-    let manifest = Manifest::load(&manifest_path)?;
+    // Validate the manifest is loadable
+    Manifest::load(&manifest_path)?;
+
     let config = LocalConfig {
         repo: Manifest::to_display_path(&repo_dir)?,
     };
 
-    Ok(CloneResult {
-        repo_dir,
-        config,
-        manifest,
-    })
+    Ok(CloneResult { repo_dir, config })
 }
