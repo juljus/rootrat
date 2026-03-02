@@ -268,3 +268,84 @@ fn git_push_to_remote() {
         .unwrap();
     assert!(verify_dir.path().join("file.txt").exists());
 }
+
+// -- collect_files gitignore tests --
+
+#[test]
+fn collect_files_respects_gitignore() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join(".gitignore"), "*.log\n").unwrap();
+    fs::write(dir.path().join("a.txt"), "hello").unwrap();
+    fs::write(dir.path().join("b.log"), "debug stuff").unwrap();
+
+    let files = collect_files(dir.path(), &[]).unwrap();
+    let names: Vec<&str> = files.iter().filter_map(|p| p.to_str()).collect();
+
+    assert!(names.contains(&"a.txt"));
+    assert!(!names.contains(&"b.log"));
+    // .gitignore itself should be collected (it's not ignored)
+    assert!(names.contains(&".gitignore"));
+}
+
+#[test]
+fn collect_files_nested_gitignore() {
+    let dir = TempDir::new().unwrap();
+
+    // Parent ignores *.tmp
+    fs::write(dir.path().join(".gitignore"), "*.tmp\n").unwrap();
+    fs::write(dir.path().join("keep.txt"), "keep").unwrap();
+    fs::write(dir.path().join("drop.tmp"), "drop").unwrap();
+
+    // Child dir ignores secret.txt
+    let child = dir.path().join("sub");
+    fs::create_dir(&child).unwrap();
+    fs::write(child.join(".gitignore"), "secret.txt\n").unwrap();
+    fs::write(child.join("visible.txt"), "visible").unwrap();
+    fs::write(child.join("secret.txt"), "secret").unwrap();
+    fs::write(child.join("also_drop.tmp"), "also drop").unwrap();
+
+    let files = collect_files(dir.path(), &[]).unwrap();
+    let names: Vec<String> = files.iter().map(|p| p.to_string_lossy().to_string()).collect();
+
+    assert!(names.contains(&"keep.txt".to_string()));
+    assert!(!names.contains(&"drop.tmp".to_string()));
+    assert!(names.contains(&"sub/visible.txt".to_string()));
+    assert!(!names.contains(&"sub/secret.txt".to_string()));
+    // Parent *.tmp rule still applies in child
+    assert!(!names.contains(&"sub/also_drop.tmp".to_string()));
+}
+
+#[test]
+fn collect_files_gitignore_negation() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join(".gitignore"), "*.log\n!important.log\n").unwrap();
+    fs::write(dir.path().join("debug.log"), "debug").unwrap();
+    fs::write(dir.path().join("important.log"), "important").unwrap();
+    fs::write(dir.path().join("readme.txt"), "readme").unwrap();
+
+    let files = collect_files(dir.path(), &[]).unwrap();
+    let names: Vec<&str> = files.iter().filter_map(|p| p.to_str()).collect();
+
+    assert!(!names.contains(&"debug.log"));
+    assert!(names.contains(&"important.log"));
+    assert!(names.contains(&"readme.txt"));
+}
+
+#[test]
+fn collect_files_gitignore_directory_pattern() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join(".gitignore"), "build/\n").unwrap();
+    fs::write(dir.path().join("src.txt"), "source").unwrap();
+
+    let build_dir = dir.path().join("build");
+    fs::create_dir(&build_dir).unwrap();
+    fs::write(build_dir.join("output.bin"), "binary").unwrap();
+    fs::write(build_dir.join("manifest.json"), "{}").unwrap();
+
+    let files = collect_files(dir.path(), &[]).unwrap();
+    let names: Vec<String> = files.iter().map(|p| p.to_string_lossy().to_string()).collect();
+
+    assert!(names.contains(&"src.txt".to_string()));
+    assert!(!names.contains(&"build/output.bin".to_string()));
+    assert!(!names.contains(&"build/manifest.json".to_string()));
+}

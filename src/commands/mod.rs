@@ -7,6 +7,7 @@ pub mod rm;
 pub mod status;
 
 use anyhow::{bail, Result};
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -164,21 +165,53 @@ pub fn git_push(repo_dir: &Path) -> Result<usize> {
 
 /// Recursively collect all file paths within a directory, relative to `base`.
 /// Skips files and directories whose name matches any entry in `ignore`.
+/// Also respects `.gitignore` files found within the directory tree.
 /// Returns a sorted set for consistent ordering and easy set operations.
 pub fn collect_files(base: &Path, ignore: &[String]) -> Result<BTreeSet<PathBuf>> {
     let mut files = BTreeSet::new();
     if base.exists() {
-        collect_files_recursive(base, base, ignore, &mut files)?;
+        collect_files_recursive(base, base, ignore, &[], &mut files)?;
     }
     Ok(files)
+}
+
+/// Build a `Gitignore` matcher from a `.gitignore` file in `dir`, if one exists.
+fn load_gitignore(dir: &Path) -> Option<Gitignore> {
+    let gitignore_path = dir.join(".gitignore");
+    if !gitignore_path.is_file() {
+        return None;
+    }
+    let mut builder = GitignoreBuilder::new(dir);
+    builder.add(gitignore_path);
+    builder.build().ok()
+}
+
+/// Check whether a path is ignored by any gitignore in the stack.
+/// Checks in reverse order (child-first) so inner `.gitignore` rules take precedence.
+fn is_gitignored(gitignores: &[Gitignore], path: &Path, is_dir: bool) -> bool {
+    for gi in gitignores.iter().rev() {
+        match gi.matched(path, is_dir) {
+            ignore::Match::None => continue,
+            ignore::Match::Ignore(_) => return true,
+            ignore::Match::Whitelist(_) => return false,
+        }
+    }
+    false
 }
 
 fn collect_files_recursive(
     base: &Path,
     dir: &Path,
     ignore: &[String],
+    gitignores: &[Gitignore],
     files: &mut BTreeSet<PathBuf>,
 ) -> Result<()> {
+    // Check for a .gitignore in this directory and extend the stack if found
+    let mut gitignores = gitignores.to_vec();
+    if let Some(gi) = load_gitignore(dir) {
+        gitignores.push(gi);
+    }
+
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let name = entry.file_name();
@@ -186,8 +219,14 @@ fn collect_files_recursive(
             continue;
         }
         let path = entry.path();
-        if path.is_dir() {
-            collect_files_recursive(base, &path, ignore, files)?;
+        let is_dir = path.is_dir();
+
+        if is_gitignored(&gitignores, &path, is_dir) {
+            continue;
+        }
+
+        if is_dir {
+            collect_files_recursive(base, &path, ignore, &gitignores, files)?;
         } else {
             files.insert(path.strip_prefix(base)?.to_path_buf());
         }

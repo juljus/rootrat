@@ -1,6 +1,6 @@
 [package]
 name = "rootrat"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 description = "A dotfiles manager"
 license = "GPL-3.0-only"
@@ -12,6 +12,7 @@ clap = { version = "4.5.60", features = ["derive"] }
 dirs = "6.0.0"
 serde = { version = "1.0.228", features = ["derive"] }
 similar = "2.7.0"
+ignore = "0.4"
 toml = "1.0.3"
 
 [dev-dependencies]
