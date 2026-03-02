@@ -16,6 +16,15 @@ fn init_repo(dir: &Path) {
         .unwrap();
 }
 
+fn git_current_branch(dir: &Path) -> String {
+    let output = Command::new("git")
+        .args(["branch", "--show-current"])
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
 fn git_log_oneline(dir: &Path) -> String {
     let output = Command::new("git")
         .args(["log", "--oneline", "--format=%s"])
@@ -147,4 +156,115 @@ fn git_init_then_commit_works() {
 
     let log = git_log_oneline(dir.path());
     assert!(log.contains("init"));
+}
+
+// -- git_pull tests --
+
+#[test]
+fn git_pull_no_remote_fails() {
+    let dir = TempDir::new().unwrap();
+    init_repo(dir.path());
+
+    let result = git_pull(dir.path());
+    assert!(result.is_err());
+}
+
+#[test]
+fn git_pull_from_remote() {
+    // Set up a bare remote
+    let remote_dir = TempDir::new().unwrap();
+    Command::new("git")
+        .args(["init", "--bare"])
+        .current_dir(remote_dir.path())
+        .output()
+        .unwrap();
+
+    // Create a repo and push to the remote
+    let origin_dir = TempDir::new().unwrap();
+    init_repo(origin_dir.path());
+    let branch = git_current_branch(origin_dir.path());
+    Command::new("git")
+        .args(["remote", "add", "origin", &remote_dir.path().to_string_lossy()])
+        .current_dir(origin_dir.path())
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["push", "-u", "origin", &branch])
+        .current_dir(origin_dir.path())
+        .output()
+        .unwrap();
+
+    // Make a new commit in origin
+    fs::write(origin_dir.path().join("new.txt"), "new content").unwrap();
+    git_commit(origin_dir.path(), "new file").unwrap();
+    Command::new("git")
+        .args(["push"])
+        .current_dir(origin_dir.path())
+        .output()
+        .unwrap();
+
+    // Clone from the remote
+    let clone_dir = TempDir::new().unwrap();
+    Command::new("git")
+        .args(["clone", &remote_dir.path().to_string_lossy(), "."])
+        .current_dir(clone_dir.path())
+        .output()
+        .unwrap();
+
+    // Pull should succeed and bring in the new file
+    git_pull(clone_dir.path()).unwrap();
+    assert!(clone_dir.path().join("new.txt").exists());
+}
+
+// -- git_push tests --
+
+#[test]
+fn git_push_no_remote_fails() {
+    let dir = TempDir::new().unwrap();
+    init_repo(dir.path());
+
+    let result = git_push(dir.path());
+    assert!(result.is_err());
+}
+
+#[test]
+fn git_push_to_remote() {
+    // Set up a bare remote
+    let remote_dir = TempDir::new().unwrap();
+    Command::new("git")
+        .args(["init", "--bare"])
+        .current_dir(remote_dir.path())
+        .output()
+        .unwrap();
+
+    // Create a repo with a remote
+    let dir = TempDir::new().unwrap();
+    init_repo(dir.path());
+    let branch = git_current_branch(dir.path());
+    Command::new("git")
+        .args(["remote", "add", "origin", &remote_dir.path().to_string_lossy()])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    // Initial push to set up tracking
+    Command::new("git")
+        .args(["push", "-u", "origin", &branch])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    // Make a new commit and push with our helper
+    fs::write(dir.path().join("file.txt"), "content").unwrap();
+    git_commit(dir.path(), "add file").unwrap();
+    git_push(dir.path()).unwrap();
+
+    // Verify the commit made it to the remote by cloning
+    let verify_dir = TempDir::new().unwrap();
+    Command::new("git")
+        .args(["clone", &remote_dir.path().to_string_lossy(), "."])
+        .current_dir(verify_dir.path())
+        .output()
+        .unwrap();
+    assert!(verify_dir.path().join("file.txt").exists());
 }

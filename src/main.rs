@@ -40,13 +40,28 @@ enum Commands {
         /// Git URL to clone from (e.g. github.com/user/dotfiles)
         url: Option<String>,
     },
+    /// Pull changes from remote
+    Pull,
+    /// Push changes to remote
+    Push,
     /// Show status of tracked files
     Status,
+    /// Sync: collect, pull, push, apply
+    Sync,
 }
 
 /// Expand ~ and resolve to an absolute path. Fails if the path doesn't exist.
 fn resolve_path(path: &str) -> Result<PathBuf> {
     Ok(std::fs::canonicalize(Manifest::expand_tilde(path))?)
+}
+
+/// Prompt the user with a [y/N] question, returns true if they answer yes.
+fn prompt_yn(message: &str) -> Result<bool> {
+    print!("{} [y/N] ", message);
+    std::io::stdout().flush()?;
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    Ok(matches!(input.trim().to_lowercase().as_str(), "y" | "yes"))
 }
 
 /// Load local config and manifest from the repo.
@@ -122,12 +137,7 @@ fn main() -> Result<()> {
             }
 
             println!();
-            print!("proceed? [y/N] ");
-            std::io::stdout().flush()?;
-
-            let mut input = String::new();
-            std::io::stdin().read_line(&mut input)?;
-            if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
+            if !prompt_yn("proceed?")? {
                 println!("aborted");
                 return Ok(());
             }
@@ -186,12 +196,7 @@ fn main() -> Result<()> {
             }
 
             println!();
-            print!("proceed? [y/N] ");
-            std::io::stdout().flush()?;
-
-            let mut input = String::new();
-            std::io::stdin().read_line(&mut input)?;
-            if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
+            if !prompt_yn("proceed?")? {
                 println!("aborted");
                 return Ok(());
             }
@@ -250,6 +255,39 @@ fn main() -> Result<()> {
             println!("cloned to: {}", result.repo_dir.display());
             println!("run `rootrat apply` to apply tracked files");
         }
+        Commands::Pull => {
+            let config = LocalConfig::load_default()?;
+            let repo = config.repo_dir();
+
+            let count = match commands::git_pull(&repo) {
+                Ok(n) => n,
+                Err(e) => {
+                    eprintln!("pull failed: {}", e);
+                    if prompt_yn("rebase?")? {
+                        commands::git_pull_rebase(&repo)?
+                    } else {
+                        anyhow::bail!("pull failed");
+                    }
+                }
+            };
+
+            if count == 0 {
+                println!("already up to date");
+            } else {
+                println!("pulled {} commit{}", count, if count == 1 { "" } else { "s" });
+            }
+        }
+        Commands::Push => {
+            let config = LocalConfig::load_default()?;
+            let repo = config.repo_dir();
+
+            let count = commands::git_push(&repo)?;
+            if count == 0 {
+                println!("already up to date");
+            } else {
+                println!("pushed {} commit{}", count, if count == 1 { "" } else { "s" });
+            }
+        }
         Commands::Status => {
             let (repo, manifest) = load_config_and_manifest()?;
 
@@ -269,6 +307,152 @@ fn main() -> Result<()> {
                     println!("{:>20}  {}", marker, entry.system_path);
                 }
             }
+        }
+        Commands::Sync => {
+            let (repo, manifest) = load_config_and_manifest()?;
+
+            // -- Phase 1: collect (system -> repo) --
+            {
+                use commands::collect::CollectState;
+                let entries = commands::collect::plan(&repo, &manifest)?;
+                let has_changes = !entries.is_empty()
+                    && entries.iter().any(|e| {
+                        !matches!(e.state, CollectState::Unchanged)
+                    });
+
+                if !has_changes {
+                    println!("collect: nothing to do");
+                } else {
+                    println!("collect:");
+                    let created: Vec<_> = entries.iter().filter(|e| e.state == CollectState::Created).collect();
+                    let updated: Vec<_> = entries.iter().filter(|e| e.state == CollectState::Updated).collect();
+                    let deleted: Vec<_> = entries.iter().filter(|e| e.state == CollectState::Deleted).collect();
+                    let missing: Vec<_> = entries.iter().filter(|e| e.state == CollectState::MissingFromSystem).collect();
+
+                    if !created.is_empty() {
+                        println!("  create:");
+                        for entry in &created {
+                            println!("    {}", entry.system_path);
+                        }
+                    }
+                    if !updated.is_empty() {
+                        println!("  update:");
+                        for entry in &updated {
+                            println!("    {}", entry.system_path);
+                        }
+                    }
+                    if !deleted.is_empty() {
+                        println!("  delete:");
+                        for entry in &deleted {
+                            println!("    {}", entry.system_path);
+                        }
+                    }
+                    if !missing.is_empty() {
+                        println!("  missing (system):");
+                        for entry in &missing {
+                            println!("    {}", entry.system_path);
+                        }
+                    }
+
+                    println!();
+                    if prompt_yn("proceed with collect?")? {
+                        commands::collect::collect_entries(&entries)?;
+                        commands::git_commit(&repo, "collect")?;
+                        println!("collected");
+                    } else if !prompt_yn("skip collect and continue sync?")? {
+                        println!("aborted");
+                        return Ok(());
+                    }
+                }
+            }
+
+            // -- Phase 2: git pull --
+            println!();
+            let pull_count = match commands::git_pull(&repo) {
+                Ok(n) => n,
+                Err(e) => {
+                    eprintln!("pull failed: {}", e);
+                    if prompt_yn("rebase?")? {
+                        commands::git_pull_rebase(&repo)?
+                    } else {
+                        anyhow::bail!("pull failed, aborting sync");
+                    }
+                }
+            };
+            if pull_count == 0 {
+                println!("pull: already up to date");
+            } else {
+                println!("pulled {} commit{}", pull_count, if pull_count == 1 { "" } else { "s" });
+            }
+
+            // -- Phase 3: git push --
+            println!();
+            let push_count = commands::git_push(&repo)?;
+            if push_count == 0 {
+                println!("push: already up to date");
+            } else {
+                println!("pushed {} commit{}", push_count, if push_count == 1 { "" } else { "s" });
+            }
+
+            // -- Phase 4: apply (repo -> system) --
+            // Reload manifest since remote may have changed it
+            let manifest = Manifest::load_from_repo(&repo)?;
+            {
+                use commands::apply::ApplyState;
+                let entries = commands::apply::plan(&repo, &manifest)?;
+                let has_changes = !entries.is_empty()
+                    && entries.iter().any(|e| {
+                        !matches!(e.state, ApplyState::Unchanged)
+                    });
+
+                if !has_changes {
+                    println!();
+                    println!("apply: nothing to do");
+                } else {
+                    println!();
+                    println!("apply:");
+                    let created: Vec<_> = entries.iter().filter(|e| e.state == ApplyState::Created).collect();
+                    let updated: Vec<_> = entries.iter().filter(|e| e.state == ApplyState::Updated).collect();
+                    let deleted: Vec<_> = entries.iter().filter(|e| e.state == ApplyState::Deleted).collect();
+                    let missing: Vec<_> = entries.iter().filter(|e| e.state == ApplyState::MissingFromRepo).collect();
+
+                    if !created.is_empty() {
+                        println!("  create:");
+                        for entry in &created {
+                            println!("    {}", entry.system_path);
+                        }
+                    }
+                    if !updated.is_empty() {
+                        println!("  modify:");
+                        for entry in &updated {
+                            println!("    {}", entry.system_path);
+                        }
+                    }
+                    if !deleted.is_empty() {
+                        println!("  delete:");
+                        for entry in &deleted {
+                            println!("    {}", entry.system_path);
+                        }
+                    }
+                    if !missing.is_empty() {
+                        println!("  missing (repo):");
+                        for entry in &missing {
+                            println!("    {}", entry.system_path);
+                        }
+                    }
+
+                    println!();
+                    if prompt_yn("proceed with apply?")? {
+                        commands::apply::apply_entries(&entries)?;
+                        println!("applied");
+                    } else {
+                        println!("skipped apply (remote is synced)");
+                    }
+                }
+            }
+
+            println!();
+            println!("sync complete");
         }
     }
 

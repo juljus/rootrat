@@ -74,6 +74,94 @@ pub fn git_init(repo_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Get the current HEAD commit hash.
+fn git_head(repo_dir: &Path) -> Result<String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(repo_dir)
+        .output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("git rev-parse HEAD failed: {}", stderr.trim());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Count commits between two revisions.
+fn git_count_commits(repo_dir: &Path, from: &str, to: &str) -> Result<usize> {
+    let range = format!("{}..{}", from, to);
+    let output = Command::new("git")
+        .args(["rev-list", "--count", &range])
+        .current_dir(repo_dir)
+        .output()?;
+    if !output.status.success() {
+        return Ok(0);
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse()
+        .unwrap_or(0))
+}
+
+/// Run `git pull` in the given repo directory. Returns the number of commits pulled.
+pub fn git_pull(repo_dir: &Path) -> Result<usize> {
+    let before = git_head(repo_dir)?;
+    let output = Command::new("git")
+        .args(["pull"])
+        .current_dir(repo_dir)
+        .output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("git pull failed: {}", stderr.trim());
+    }
+    let after = git_head(repo_dir)?;
+    git_count_commits(repo_dir, &before, &after)
+}
+
+/// Run `git pull --rebase` in the given repo directory. Returns the number of commits pulled.
+pub fn git_pull_rebase(repo_dir: &Path) -> Result<usize> {
+    let before = git_head(repo_dir)?;
+    let output = Command::new("git")
+        .args(["pull", "--rebase"])
+        .current_dir(repo_dir)
+        .output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("git pull --rebase failed: {}", stderr.trim());
+    }
+    let after = git_head(repo_dir)?;
+    git_count_commits(repo_dir, &before, &after)
+}
+
+/// Count the number of commits ahead of the remote tracking branch.
+pub fn git_unpushed_count(repo_dir: &Path) -> Result<usize> {
+    let output = Command::new("git")
+        .args(["rev-list", "--count", "@{u}..HEAD"])
+        .current_dir(repo_dir)
+        .output()?;
+    if !output.status.success() {
+        return Ok(0);
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse()
+        .unwrap_or(0))
+}
+
+/// Run `git push` in the given repo directory. Returns the number of commits pushed.
+pub fn git_push(repo_dir: &Path) -> Result<usize> {
+    let count = git_unpushed_count(repo_dir)?;
+    let output = Command::new("git")
+        .args(["push"])
+        .current_dir(repo_dir)
+        .output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("git push failed: {}", stderr.trim());
+    }
+    Ok(count)
+}
+
 /// Recursively collect all file paths within a directory, relative to `base`.
 /// Skips files and directories whose name matches any entry in `ignore`.
 /// Returns a sorted set for consistent ordering and easy set operations.
