@@ -87,10 +87,10 @@ fn diff_file(
             }
 
             let mut diff = format!(
-                "\x1b[1m--- repo:   {}\x1b[0m\n\x1b[1m+++ system: {}\x1b[0m\n",
-                repo_display, system_display
+                "\x1b[1m--- system: {}\x1b[0m\n\x1b[1m+++ repo:   {}\x1b[0m\n",
+                system_display, repo_display
             );
-            diff.push_str(&format_diff(&repo_content, &system_content));
+            diff.push_str(&format_diff(&system_content, &repo_content));
             diff
         }
     };
