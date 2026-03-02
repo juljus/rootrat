@@ -1,6 +1,6 @@
 [package]
 name = "rootrat"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 description = "A dotfiles manager"
 license = "GPL-3.0-only"
