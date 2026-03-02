@@ -209,7 +209,7 @@ fn main() -> Result<()> {
                 println!("no differences");
             } else {
                 for entry in &entries {
-                    println!("--- {}", entry.system_path);
+                    println!("\x1b[1m--- {}\x1b[0m", entry.system_path);
                     print!("{}", entry.diff);
                     println!();
                 }

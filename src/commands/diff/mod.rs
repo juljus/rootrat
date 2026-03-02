@@ -100,14 +100,25 @@ fn format_diff(repo_content: &str, system_content: &str) -> String {
     let text_diff = TextDiff::from_lines(repo_content, system_content);
     let mut output = String::new();
 
-    for change in text_diff.iter_all_changes() {
-        let marker = match change.tag() {
-            ChangeTag::Delete => "- ",
-            ChangeTag::Insert => "+ ",
-            ChangeTag::Equal => "  ",
-        };
-        output.push_str(marker);
-        output.push_str(change.value());
+    for hunk in text_diff.unified_diff().context_radius(3).iter_hunks() {
+        output.push_str(&format!("\x1b[36m{}\x1b[0m\n", hunk.header()));
+
+        for change in hunk.iter_changes() {
+            match change.tag() {
+                ChangeTag::Delete => {
+                    output.push_str(&format!("\x1b[31m- {}\x1b[0m", change.value()));
+                }
+                ChangeTag::Insert => {
+                    output.push_str(&format!("\x1b[32m+ {}\x1b[0m", change.value()));
+                }
+                ChangeTag::Equal => {
+                    output.push_str(&format!("  {}", change.value()));
+                }
+            }
+            if !change.value().ends_with('\n') {
+                output.push('\n');
+            }
+        }
     }
 
     output
