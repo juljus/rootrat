@@ -40,6 +40,7 @@ rootrat init github.com/you/dotfiles
 | `diff [path]` | Show differences between repo and system |
 | `collect` | Sync system changes into the repo |
 | `apply` | Sync repo files to the system (interactive) |
+| `sync` | collect -> pull -> push -> apply |
 
 ## How it works
 
