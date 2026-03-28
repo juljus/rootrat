@@ -23,7 +23,7 @@ rootrat add ~/.config/nvim  # directories work too
 rootrat status
 
 # After editing your dotfiles, collect changes into the repo
-rootrat collect
+rootrat collect (or sync)
 
 # On another machine, clone and apply
 rootrat init github.com/you/dotfiles
@@ -39,7 +39,7 @@ rootrat init github.com/you/dotfiles
 | `status` | Show tracked file states |
 | `diff [path]` | Show differences between repo and system |
 | `collect` | Sync system changes into the repo |
-| `apply` | Sync repo files to the system (interactive) |
+| `apply` | Sync repo files to the system |
 | `sync` | collect -> pull -> push -> apply |
 
 ## How it works
